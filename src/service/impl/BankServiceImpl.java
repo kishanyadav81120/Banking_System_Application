@@ -1,0 +1,115 @@
+package service.impl;
+
+import domain.Account;
+import domain.Customer;
+import domain.Transaction;
+import domain.Type;
+import repository.AccountRepository;
+import repository.CustomerRepository;
+import repository.TransactionRepository;
+import service.BankService;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+public class BankServiceImpl implements BankService
+{
+    private  AccountRepository accountRepository = new AccountRepository();
+    private TransactionRepository transactionRepository= new TransactionRepository();
+    private final CustomerRepository customerRepository = new CustomerRepository();
+    @Override
+    public String openAccount(String name, String email, String type) {
+        String customerId= UUID.randomUUID().toString();
+        Customer c = new Customer(customerId,name,email);
+        customerRepository.save(c);
+        String accountNumber = getAccountNumber();
+        Account account = new Account(accountNumber,customerId, (double) 0,type);
+        accountRepository.save(account);
+        return accountNumber;
+    }
+
+    @Override
+    public List<Account> listAccounts() {
+        return accountRepository.findAll().stream().sorted(Comparator.comparing(Account::getAccountNumber)).collect(Collectors.toList());
+    }
+
+    @Override
+    public void deposit(String accountNumber, Double amount, String note) {
+        Account account=accountRepository.findByNumber(accountNumber).orElseThrow(()-> new RuntimeException("Account not found"+accountNumber));
+        account.setBalance(account.getBalance() + amount);
+
+        Transaction transaction= new Transaction(UUID.randomUUID().toString(),Type.DEPOSIT,account.getAccountNumber(),amount,note,LocalDateTime.now());
+        transactionRepository.add(transaction);
+
+    }
+
+    @Override
+    public void withdraw(String accountNumber, Double amount, String note)
+    {
+        Account account=accountRepository.findByNumber(accountNumber).orElseThrow(()-> new RuntimeException("Account not found"+accountNumber));
+       if(account.getBalance().compareTo(amount)<0)
+       {
+           throw new RuntimeException("Insufficient Balance");
+       }
+        account.setBalance(account.getBalance() - amount);
+
+        Transaction transaction= new Transaction(UUID.randomUUID().toString(),Type.WITHDRAW,account.getAccountNumber(),amount,note,LocalDateTime.now());
+        transactionRepository.add(transaction);
+    }
+
+    @Override
+    public void transfer(String fromAcc, String toAcc, Double amount, String note)
+    {
+        if (fromAcc.equals(toAcc))
+            throw new RuntimeException("Cannot transfer to your own account");
+        Account from = accountRepository.findByNumber(fromAcc)
+                .orElseThrow(() -> new RuntimeException("Account not found: " + fromAcc));
+        Account to = accountRepository.findByNumber(toAcc)
+                .orElseThrow(() -> new RuntimeException("Account not found: " + toAcc));
+        if (from.getBalance().compareTo(amount) < 0)
+            throw new RuntimeException("Insufficient Balance");
+
+        from.setBalance(from.getBalance() - amount);
+        to.setBalance(to.getBalance() + amount);
+
+        transactionRepository.add(new Transaction(UUID.randomUUID().toString(),Type.TRANSFER_OUT,from.getAccountNumber(),amount,note,LocalDateTime.now()));
+
+        transactionRepository.add(new Transaction(UUID.randomUUID().toString(),Type.TRANSFER_IN,to.getAccountNumber(),amount,note,LocalDateTime.now()));
+
+    }
+
+    @Override
+    public List<Transaction> getStatement(String account) {
+        return transactionRepository.findByAccount(account).stream()
+                .sorted(Comparator.comparing(Transaction::getTimestamp))
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<Account> searchAccountsByCustomerName(String q) {
+        String query = (q == null) ? "" : q.toLowerCase();
+//        List<Account> result = new ArrayList<>();
+//        for (Customer c : customerRepository.findAll()){
+//            if (c.getName().toLowerCase().contains(query))
+//                result.addAll(accountRepository.findByCustomerId(c.getId()));
+//        }
+//        result.sort(Comparator.comparing(Account::getAccountNumber));
+
+        return customerRepository.findAll().stream()
+                .filter(c -> c.getName().toLowerCase().contains(query))
+                .flatMap(c -> accountRepository.findByCustomerId(c.getId()).stream())
+                .sorted(Comparator.comparing(Account::getAccountNumber))
+                .collect(Collectors.toList());
+
+//        return result;
+    }
+
+    private String getAccountNumber() {
+        int size =accountRepository.findAll().size()+1;
+        return String.format("AC%06d", size);
+    }
+}
